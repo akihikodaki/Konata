@@ -652,7 +652,7 @@ class KonataRenderer{
         // 背景をクリア
         let ctx = tile.getContext("2d");
         ctx.fillStyle = self.style_.labelPane.backgroundColor;//"rgb(245,245,245)";
-        ctx.fillRect(0, 0, tile.width, tile.height);
+        ctx.fillRect(0, 0, tile.clientWidth, tile.clientHeight);
 
         // 小さくなりすぎたらスキップ
         if (!self.canDrawText) {
@@ -665,8 +665,8 @@ class KonataRenderer{
         ctx.fillStyle = self.style_.labelPane.fontColor;
 
         // スケールを勘案した論理サイズに変換
-        let logHeight = tile.height / self.opH_;
-        //let logWidth = tile.width / (scale * self.opW_);
+        let logHeight = tile.clientHeight / self.opH_;
+        //let logWidth = tile.clientWidth / (scale * self.opW_);
         
         let marginLeft = self.style_.labelPane.marginLeft;
         let marginTop = (self.laneH_ - self.lane_height_margin_*2 - fontSizeRaw) / 2 + fontSizeRaw;
@@ -703,21 +703,21 @@ class KonataRenderer{
     drawPipelineTile_(tile, top, left){
         let self = this;
         let scale = self.zoomScale_;
-        let height = tile.height / self.opH_;
-        let width = tile.width / self.opW_;
+        let height = tile.clientHeight / self.opH_;
+        let width = tile.clientWidth / self.opW_;
 
         let ctx = tile.getContext("2d");
         ctx.fillStyle = self.style_.pipelinePane.backgroundColor; //"rgb(255,255,255)";
-        ctx.fillRect(0, 0, tile.width, tile.height);
+        ctx.fillRect(0, 0, tile.clientWidth, tile.clientHeight);
 
         // 上側にはみ出ていた場合，暗く描画
         let offsetY = 0;
         if (top < 0) {
             let bottom = -top * self.opH_ + self.PIXEL_ADJUST;
-            bottom = Math.min(tile.height, bottom);
+            bottom = Math.min(tile.clientHeight, bottom);
             ctx.fillStyle = this.style_.pipelinePane.invalidBackgroundColor;
-            ctx.fillRect(0, 0, tile.width, bottom);
-            if (bottom >= tile.height) {
+            ctx.fillRect(0, 0, tile.clientWidth, bottom);
+            if (bottom >= tile.clientHeight) {
                 return;
             }
             offsetY = -top;
@@ -771,10 +771,10 @@ class KonataRenderer{
         // 下側にはみ出ていた場合，暗く描画
         let bottomOuterHeight = top - offsetY + height - 1 - self.getVisibleBottom();
         if (bottomOuterHeight > 0) {
-            let begin = tile.height - bottomOuterHeight * self.opH_ + self.PIXEL_ADJUST;
+            let begin = tile.clientHeight - bottomOuterHeight * self.opH_ + self.PIXEL_ADJUST;
             begin = Math.max(0, begin);
             ctx.fillStyle = this.style_.pipelinePane.invalidBackgroundColor;
-            ctx.fillRect(0, begin, tile.width, tile.height);
+            ctx.fillRect(0, begin, tile.clientWidth, tile.clientHeight);
         }
     }
 
