@@ -24,6 +24,10 @@ class KonataRenderer{
             top: 0
         }; 
 
+        // The logical size of the pipeline currently drawn
+        this.viewHeight_ = 0;
+        this.viewWidth_ = 0;
+
 
         // 依存関係の矢印のタイプ
         this.depArrowType_ = DEP_ARROW_TYPE.INSIDE_LINE;
@@ -250,37 +254,72 @@ class KonataRenderer{
     }
 
     /**
+     * Compute horizontal adjustment to minimize a horizontal margin if present.
+     * @param {number} left - The logical position of the left edge of the viewport
+     * @param {number} top - The logical position of the right edge of the viewport
+     * @param {number} width - The logical width of the viewport
+     * @param {number} height - The logical height of the viewport
+     * @returns {number} Horizontal adjustment to minimize a horizontal margin if
+     *                   present. 0 otherwise.
+     */
+    computeDiffXMinimizingMargin(left, top, width, height)
+    {
+        const right = left + width;
+        const bottom = top + height - 1;
+        const topOpPos = Math.max(Math.floor(top), 0);
+        const topOp = this.getVisibleOp(topOpPos, this.opResolution);
+        const bottomOpPos = Math.min(Math.floor(bottom), this.getVisibleBottom());
+        const bottomOp = this.getVisibleOp(bottomOpPos, this.opResolution);
+
+        if (!topOp || !bottomOp) {
+            return 0;
+        }
+
+        const leftOffset = topOp.fetchedCycle - left;
+        const rightOffset = bottomOp.retiredCycle - right;
+
+        // Constrain the direction; scroll only if both leftOffset and
+        // rightOffset have the same direction.
+        if ((leftOffset < 0) != (rightOffset < 0)) {
+            return 0;
+        }
+
+        // Constrain the distance; now either the absolute value of leftOffset
+        // or one of rightOffset represents the margin, and the other represents
+        // the length of the hidden pipeline stages. Pick the less absolute
+        // value.
+        // If both are negative, pick the greater.
+        // If both are positive, pick the less.
+        return (leftOffset < 0) == (leftOffset < rightOffset) ? rightOffset : leftOffset;
+    }
+
+    /**
      * 縦スクロール時の横方向の補正値を計算
      * @param {number} diffY - 移動量
      */
     adjustScrollDiffX(diffY){
         let self = this;
-        let posY = self.viewPos_.top;
-        let y = Math.floor(posY);
-        if (y < 0 || y > self.getVisibleBottom()){
-            return 0;
+
+        const oldDiffX = self.computeDiffXMinimizingMargin(
+            self.viewPos_.left, self.viewPos_.top,
+            self.viewWidth_, self.viewHeight_);
+
+        const newDiffX = self.computeDiffXMinimizingMargin(
+            self.viewPos_.left, self.viewPos_.top + diffY,
+            self.viewWidth_, self.viewHeight_);
+
+        // Check if an old margin is present and is at the same side with the
+        // new one.
+        if (!oldDiffX || (oldDiffX < 0) != (newDiffX < 0)) {
+            return newDiffX;
         }
 
-        // 画面に表示されているものの中で最も上にあるものを基準に
-        let oldOp = null;
-        oldOp = self.getVisibleOp(y, this.opResolution);
-
-        // 水平方向の補正を行う
-        let newTop = y + diffY;
-        let newY = Math.floor(newTop);
-        let newOp = self.getVisibleOp(newY, this.opResolution);
-
-        if (!newOp) {
-            return 0;
-        }
-        else if (!oldOp || newOp.id == oldOp.id) {
-            let left = self.viewPos_.left;
-            return newOp.fetchedCycle - left;
-        }
-        else{
-            // スクロール前と後の，左上の命令の水平方向の差を加算
-            return newOp.fetchedCycle - oldOp.fetchedCycle;
-        }
+        // If a margin is growing, scroll to fill only the grown region.
+        // The existing part of the margin will be preseved; a user may want to
+        // display somewhere away from the currently active pipeline because
+        // the user is interested in another pipeline shown in the transparent
+        // mode.
+        return (newDiffX < 0) == (newDiffX < oldDiffX) ? newDiffX - oldDiffX : 0;
     }
 
     /**
@@ -296,19 +335,8 @@ class KonataRenderer{
         let op = null;
         op = self.getVisibleOp(y, this.opResolution);
 
-        let oldTop = self.viewPos_.top;
-        self.viewPos_.top = posY;
-
         if (adjust && op) {
-            // 水平方向の補正を行う
-            let oldOp = self.getVisibleOp(Math.floor(oldTop), this.opResolution);
-            if (!oldOp) {
-                self.viewPos_.left = op.fetchedCycle;
-            }
-            else{
-                // スクロール前と後の，左上の命令の水平方向の差を加算
-                self.viewPos_.left += op.fetchedCycle - oldOp.fetchedCycle;
-            }
+            self.viewPos_.left += self.adjustScrollDiffX(diff[1]);
         } 
         else {
             self.viewPos_.left += diff[0];
@@ -316,6 +344,8 @@ class KonataRenderer{
             //    self.viewPos_.left = 0;
             //}
         }
+
+        self.viewPos_.top = posY;
     }
 
     /**
@@ -703,8 +733,8 @@ class KonataRenderer{
     drawPipelineTile_(tile, top, left){
         let self = this;
         let scale = self.zoomScale_;
-        let height = tile.clientHeight / self.opH_;
-        let width = tile.clientWidth / self.opW_;
+        self.viewHeight_ = tile.clientHeight / self.opH_;
+        self.viewWidth_ = tile.clientWidth / self.opW_;
 
         let ctx = tile.getContext("2d");
         ctx.fillStyle = self.style_.pipelinePane.backgroundColor; //"rgb(255,255,255)";
@@ -727,7 +757,7 @@ class KonataRenderer{
         // タイルの描画
         let skipRendering = false;
         for (let y = Math.floor(top); 
-            y < top + height; 
+            y < top + self.viewHeight_; 
             y += (this.opH_ < 0.25) ? self.drawingInterval_ : 1
         ) {
 
@@ -757,19 +787,19 @@ class KonataRenderer{
                 continue;   
             }
 
-            if (!self.drawOp_(op, y - top + offsetY, left, left + width, scale, ctx)) {
+            if (!self.drawOp_(op, y - top + offsetY, left, left + self.viewWidth_, scale, ctx)) {
                 skipRendering = true;
             }
         }
 
         // 依存関係
         if (self.depArrowType_ != DEP_ARROW_TYPE.NOT_SHOW) {
-            self.drawDependency(offsetY, top, left, width, height, ctx);
+            self.drawDependency(offsetY, top, left, self.viewWidth_, self.viewHeight_, ctx);
         }
 
 
         // 下側にはみ出ていた場合，暗く描画
-        let bottomOuterHeight = top - offsetY + height - 1 - self.getVisibleBottom();
+        let bottomOuterHeight = top - offsetY + self.viewHeight_ - 1 - self.getVisibleBottom();
         if (bottomOuterHeight > 0) {
             let begin = tile.clientHeight - bottomOuterHeight * self.opH_ + self.PIXEL_ADJUST;
             begin = Math.max(0, begin);
